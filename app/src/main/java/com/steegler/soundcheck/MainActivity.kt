@@ -34,6 +34,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
     private var audioJob: Job? = null
@@ -45,9 +47,9 @@ class MainActivity : ComponentActivity() {
         checkPermissions()
 
         setContent {
-            var broadcastID by remember { mutableStateOf("01JBBBJT4SS9K04K3B7X8JG4TE") }
-            var serverUrl by remember { mutableStateOf("http://192.168.1.22:9080/broadcast") }
-            var authToken by remember { mutableStateOf("eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhdXRoLXNlcnZpY2UiLCJ1c2VySWQiOiIwMUpBUFlUVEtSRE44Qjc3M1k4NlM3VFBKQiIsInVzZXJuYW1lIjoibWUiLCJleHAiOjE3MzE1NTYzMzZ9.xjTi0W23JLRuPX5ADMBZO3idpV59oNdwoqLpphsRw8XDBj05Gkw2FTEt_0ozQ-hAq7WrxujjDp9FeyGD-p3NgA") }
+            var broadcastID by remember { mutableStateOf("* BROADCAST ID ") }
+            var serverUrl by remember { mutableStateOf("https://ptt.steegler.com/broadcast") }
+            var authToken by remember { mutableStateOf("* BEARER TOKEN *") }
             var isStreaming by remember { mutableStateOf(false) }
             var isPlaying by remember { mutableStateOf(false) }
 
@@ -155,12 +157,6 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("MissingPermission")
     private fun startAudioStreaming(broadcastID: String, serverUrl: String, authToken: String) {
-        val sampleRate = 44100
-        val bufferSize = AudioRecord.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
 
         val audioRecord = AudioRecord(
             MediaRecorder.AudioSource.MIC,
@@ -179,10 +175,12 @@ class MainActivity : ComponentActivity() {
 
                 audioRecord.startRecording()
                 Log.i("MainActivity", "Streaming started.")
-
+                var counter = 0
                 while (isActive) {
                     val bytesRead = audioRecord.read(buffer, 0, buffer.size)
                     if (bytesRead > 0) {
+                        counter ++
+                        println("$counter -> $bytesRead bytes ${buffer.md5()}")
                         outputStream.write(buffer, 0, bytesRead)
                         outputStream.flush()
                     }
@@ -191,9 +189,11 @@ class MainActivity : ComponentActivity() {
                 audioRecord.stop()
                 outputStream.close()
                 connection.disconnect()
-                Log.i("MainActivity", "Streaming stopped.")
+                Log.i("MainActivity", "Streaming stopped. $counter chunks sent")
             } catch (e: Exception) {
                 Log.e("MainActivity", "Streaming error: ${e.message}")
+            } finally {
+                println("BFS -> $bufferSize")
             }
         }
     }
@@ -204,12 +204,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startPlayback(broadcastID: String, serverUrl: String, authToken: String) {
-        val sampleRate = 44100
-        val bufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
 
         val audioTrack = AudioTrack.Builder()
             .setAudioFormat(
@@ -246,6 +240,8 @@ class MainActivity : ComponentActivity() {
                 Log.e("MainActivity", "Playback error: ${e.message}")
             }
         }
+
+        println("BFS -> $bufferSize")
     }
 
     private fun stopPlayback() {
@@ -255,7 +251,7 @@ class MainActivity : ComponentActivity() {
 
     private fun createHttpConnection(url: String, authToken: String): HttpURLConnection {
         return (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "PUT"
+            requestMethod = "POST"
             doOutput = true
             setRequestProperty("Authorization", "Bearer $authToken")
             setRequestProperty("Content-Type", "application/octet-stream")
@@ -278,4 +274,14 @@ class MainActivity : ComponentActivity() {
             setRequestProperty("Authorization", "Bearer $authToken")
         }
     }
+
+    private val sampleRate = 44100
+    private val bufferSize = max(
+        AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT),
+        AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+    )
+}
+fun ByteArray.md5(): String {
+    val md = MessageDigest.getInstance("MD5")
+    return md.digest(this).joinToString("") { "%02x".format(it) }
 }
